@@ -16,6 +16,7 @@ import (
 
 type EncodeData struct {
 	longURL string
+	bitlink string
 	clicks  int
 }
 
@@ -24,30 +25,44 @@ type DecodeData struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-func UnmarshalCSV(f io.Reader) (map[string]*EncodeData, error) {
+type Data struct {
+	EncodeData []*EncodeData
+	DecodeData []*DecodeData
+}
+
+type ClickMapStruct struct {
+	longURL string
+	clicks  int
+}
+
+// bitlink => longURL mapping
+type LinkMap map[string]string
+
+// longURL => click mapping
+type ClickMap map[string]int
+
+// return data structure
+type SortedSlice []map[string]int
+
+func UnmarshalCSV(f io.Reader) ([]*EncodeData, error) {
 	l, err := csv.NewReader(f).ReadAll()
 	if err != nil {
 		return nil, err
 	}
 
-	var em = make(map[string]*EncodeData)
+	var ed []*EncodeData
 	for i, v := range l {
-		// ignore column names
 		if i == 0 {
 			continue
 		}
-
 		e := &EncodeData{
+			bitlink: fmt.Sprintf("%s/%s", v[1], v[2]),
 			longURL: v[0],
 			clicks:  0,
 		}
-		// in case of custom domain with same hash (bit.ly/hi1234 != es.pn/hi1234)
-		id := fmt.Sprintf("%s/%s", v[1], v[2])
-
-		em[id] = e
+		ed = append(ed, e)
 	}
-
-	return em, nil
+	return ed, nil
 }
 
 func UnmarshalJSON(f io.Reader) ([]*DecodeData, error) {
@@ -63,60 +78,59 @@ func UnmarshalJSON(f io.Reader) ([]*DecodeData, error) {
 	return dd, nil
 }
 
-func updateClickData(dd []*DecodeData, encodedMap map[string]*EncodeData) (map[string]*EncodeData, error) {
-	// main login O(n) where n is number of objects in json file
-	for _, v := range dd {
-		// short circuit if year is not 2021
+func (d *Data) updateClickData(linkMap LinkMap) ([]*ClickMapStruct, error) {
+	cm := make(ClickMap)
+
+	for _, v := range d.EncodeData {
+		cm[v.longURL] = v.clicks
+	}
+
+	for _, v := range d.DecodeData {
 		if v.Timestamp.Year() != 2021 {
 			continue
 		}
 
-		// 0(1): parse id, replace full url with domain/hash: http://bit.ly/2kJdsg8 => bit.ly/2kJdsg8
-		// Match encoded id for constant time lookup
 		u, err := url.Parse(v.Bitlink)
 		if err != nil {
 			return nil, err
 		}
-		id := fmt.Sprintf("%s%s", u.Host, u.Path)
 
-		// O(1): increase click count on bitlink id
-		if _, ok := encodedMap[id]; ok {
-			encodedMap[id].clicks += 1
+		id := fmt.Sprintf("%s%s", u.Host, u.Path)
+		if val, ok := linkMap[id]; ok {
+			cm[val] += 1
 		}
 	}
 
-	return encodedMap, nil
+	cms := []*ClickMapStruct{}
+	for k, v := range cm {
+		cms = append(cms, &ClickMapStruct{k, v})
+	}
+	return cms, nil
 }
 
-func arrMapSort(em map[string]*EncodeData) []map[string]int {
-	// Sorting
-	type kv struct {
-		k string
-		v int
+func (d *Data) fillLinkMap() LinkMap {
+	m := make(LinkMap)
+	for _, v := range d.EncodeData {
+		m[v.bitlink] = v.longURL
 	}
-	var ss []kv
+	return m
+}
 
-	// [{https://linkedin.com/ 529} {https://youtube.com/ 469} {https://google.com/ 502} {https://github.com/ 476} {https://twitter.com/ 525} {https://reddit.com/ 542}]
-	for _, v := range em {
-		ss = append(ss, kv{v.longURL, v.clicks})
-	}
-
-	// [{https://reddit.com/ 542} {https://linkedin.com/ 529} {https://twitter.com/ 525} {https://google.com/ 502} {https://github.com/ 476} {https://youtube.com/ 469}]
-	sort.Slice(ss, func(i, j int) bool {
-		return ss[i].v > ss[j].v
+func sortData(cms []*ClickMapStruct) {
+	sort.Slice(cms, func(i, j int) bool {
+		return cms[i].clicks > cms[j].clicks
 	})
+}
 
-	// [map[https://reddit.com/:542] map[https://linkedin.com/:529] map[https://twitter.com/:525] map[https://google.com/:502] map[https://github.com/:476] map[https://youtube.com/:469]]
-	var res []map[string]int
-	for _, value := range ss {
-		res = append(res, map[string]int{value.k: value.v})
+func convertToMap(cm []*ClickMapStruct) SortedSlice {
+	var res SortedSlice
+	for _, v := range cm {
+		res = append(res, map[string]int{v.longURL: v.clicks})
 	}
-
 	return res
 }
 
 func main() {
-	// open both files first in case there is an error
 	csvFile, err := os.Open("encodes.csv")
 	if err != nil {
 		log.Fatal(err)
@@ -129,25 +143,31 @@ func main() {
 	}
 	defer jsonFile.Close()
 
-	// Unmarshal csv => map[string]*EncodeData for O(1) lookup, key = bitlinkID => "bit.ly/2kJO0qs: {"https://twitter.com"/", 0}
-	encodedMap, err := UnmarshalCSV(csvFile)
+	ed, err := UnmarshalCSV(csvFile)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Unmarshal JSON => []*DecodeData
 	dd, err := UnmarshalJSON(jsonFile)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// sort => convert to []map[string]int
-	udpatedMap, err := updateClickData(dd, encodedMap)
+	data := Data{
+		EncodeData: ed,
+		DecodeData: dd,
+	}
+
+	lm := data.fillLinkMap()
+
+	cm, err := data.updateClickData(lm)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	res := arrMapSort(udpatedMap)
+	sortData(cm)
 
-	fmt.Print(res)
+	resMapping := convertToMap(cm)
+
+	fmt.Println(resMapping)
 }
