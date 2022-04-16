@@ -110,86 +110,97 @@ func TestUnmarshalJSON(t *testing.T) {
 	}
 }
 
-// func TestUpdateClickData(t *testing.T) {
-// 	assert := assert.New(t)
+func TestUpdateClickData(t *testing.T) {
+	assert := assert.New(t)
 
-// 	tests := []struct {
-// 		description string
-// 		decodeData  []*DecodeData
-// 		encodeData  map[string]*EncodeData
-// 		expRes      map[string]*EncodeData
-// 		expErr      bool
-// 	}{
-// 		{
-// 			description: "success updating click data",
-// 			decodeData: []*DecodeData{
-// 				{
-// 					Bitlink:   "http://bit.ly/3hxENM5", // +1
-// 					Timestamp: time.Date(2021, 05, 13, 0, 0, 0, 0, time.UTC),
-// 				},
-// 				{
-// 					Bitlink:   "http://bit.ly/jake", // skip
-// 					Timestamp: time.Date(2021, 06, 01, 0, 0, 0, 0, time.UTC),
-// 				},
-// 				{
-// 					Bitlink:   "http://bit.ly/3hxENM5", // skip
-// 					Timestamp: time.Date(2020, 06, 01, 0, 0, 0, 0, time.UTC),
-// 				},
-// 				{
-// 					Bitlink:   "http://bit.ly/3hxENM5", // +1
-// 					Timestamp: time.Date(2021, 06, 01, 0, 0, 0, 0, time.UTC),
-// 				},
-// 			},
-// 			encodeData: map[string]*EncodeData{
-// 				"bit.ly/3hxENM5": {
-// 					longURL: "https://adventuretime.com/",
-// 					clicks:  0,
-// 				},
-// 			},
-// 			expRes: map[string]*EncodeData{
-// 				"bit.ly/3hxENM5": {
-// 					longURL: "https://adventuretime.com/",
-// 					clicks:  2,
-// 				},
-// 			},
-// 			expErr: false,
-// 		},
-// 		{
-// 			description: "url parse error",
-// 			decodeData: []*DecodeData{
-// 				{
-// 					Bitlink:   "%foo.html",
-// 					Timestamp: time.Date(2021, 05, 13, 0, 0, 0, 0, time.UTC),
-// 				},
-// 			},
-// 			encodeData: map[string]*EncodeData{
-// 				"bit.ly/3hxENM5": {
-// 					longURL: "https://adventuretime.com/",
-// 					clicks:  0,
-// 				},
-// 			},
-// 			expRes: map[string]*EncodeData(nil),
-// 			expErr: true,
-// 		},
-// 	}
-// 	for i, tc := range tests {
-// 		tc := tc
-// 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-// 			t.Parallel()
-// 			t.Log(tc.description)
+	tests := []struct {
+		description string
+		data        *Data
+		linkMapping LinkMap
+		expRes      []*ClickMapStruct
+		expErr      bool
+	}{
+		{
+			description: "success updating click data",
+			data: &Data{
+				DecodeData: []*DecodeData{
+					{
+						Bitlink:   "http://bit.ly/3hxENM5", // +1
+						Timestamp: time.Date(2021, 05, 13, 0, 0, 0, 0, time.UTC),
+					},
+					{
+						Bitlink:   "http://bit.ly/jake", // skip
+						Timestamp: time.Date(2021, 06, 01, 0, 0, 0, 0, time.UTC),
+					},
+					{
+						Bitlink:   "http://bit.ly/3hxENM5", // skip
+						Timestamp: time.Date(2020, 06, 01, 0, 0, 0, 0, time.UTC),
+					},
+					{
+						Bitlink:   "http://bit.ly/3hxENM5", // +1
+						Timestamp: time.Date(2021, 06, 01, 0, 0, 0, 0, time.UTC),
+					},
+				},
+				EncodeData: []*EncodeData{
+					{
+						longURL: "https://adventuretime.com/",
+						bitlink: "bit.ly/3hxENM5",
+						clicks:  0,
+					},
+				},
+			},
+			linkMapping: LinkMap{"bit.ly/3hxENM5": "https://adventuretime.com/"},
+			expRes: []*ClickMapStruct{
+				{
+					longURL: "https://adventuretime.com/",
+					clicks:  2,
+				},
+			},
+			expErr: false,
+		},
+		{
+			description: "url parse error",
+			data: &Data{
+				DecodeData: []*DecodeData{
+					{
+						Bitlink:   "%foo.html",
+						Timestamp: time.Date(2021, 05, 13, 0, 0, 0, 0, time.UTC),
+					},
+				},
+				EncodeData: []*EncodeData{
+					{
+						longURL: "https://adventuretime.com/",
+						bitlink: "bit.ly/3hxENM5",
+						clicks:  0,
+					},
+				},
+			},
+			expRes: nil,
+			expErr: true,
+		},
+	}
+	for i, tc := range tests {
+		tc := tc
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			t.Parallel()
+			t.Log(tc.description)
+			d := Data{
+				tc.data.EncodeData,
+				tc.data.DecodeData,
+			}
 
-// 			ed, err := updateClickData(tc.decodeData, tc.encodeData)
-// 			if tc.expErr {
-// 				assert.Error(err)
-// 			} else {
-// 				assert.NoError(err)
-// 			}
+			ed, err := d.updateClickData(tc.linkMapping)
+			if tc.expErr {
+				assert.Error(err)
+			} else {
+				assert.NoError(err)
+			}
 
-// 			assert.Equal(tc.expRes, ed)
+			assert.Equal(tc.expRes, ed)
 
-// 		})
-// 	}
-// }
+		})
+	}
+}
 
 // func TestArrMapSort(t *testing.T) {
 // 	assert := assert.New(t)
